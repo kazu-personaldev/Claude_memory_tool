@@ -50,11 +50,15 @@
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1.5">モデル</label>
-                    <select id="modelSelect" class="w-full border border-gray-200 rounded-xl p-3 text-sm bg-white focus:border-orange-400 transition">
-                        <option value="claude-opus-4-5-20251101">Claude Opus 4.5（最高品質・低速）</option>
-                        <option value="claude-sonnet-4-5-20251001" selected>Claude Sonnet 4.5（バランス）</option>
+                    <select id="modelSelect" onchange="onModelSelectChange()" class="w-full border border-gray-200 rounded-xl p-3 text-sm bg-white focus:border-orange-400 transition">
+                        <option value="claude-opus-4-8">Claude Opus 4.8（最高品質・低速）</option>
+                        <option value="claude-sonnet-4-6" selected>Claude Sonnet 4.6（バランス）</option>
                         <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5（高速・低コスト）</option>
+                        <option value="custom">カスタム（モデルIDを直接入力）</option>
                     </select>
+                    <input type="text" id="customModelInput" placeholder="例: claude-opus-4-8" style="display:none"
+                        class="w-full border border-gray-200 rounded-xl p-3 text-sm font-mono mt-2 focus:border-orange-400 transition">
+                    <p class="text-xs text-gray-400 mt-1.5">新しいモデルが出たら「カスタム」でモデルIDを直接入力できます</p>
                 </div>
             </div>
             <div class="flex gap-3 mt-6">
@@ -149,7 +153,7 @@
     <script>
         let tasks = JSON.parse(localStorage.getItem('claudeTasks') || '[]');
         let apiKey = localStorage.getItem('claudeApiKey') || '';
-        let model = localStorage.getItem('claudeModel') || 'claude-sonnet-4-5-20251001';
+        let model = localStorage.getItem('claudeModel') || 'claude-sonnet-4-6';
 
         function init() {
             checkApiKey();
@@ -163,9 +167,24 @@
             document.getElementById('apiKeyWarning').classList.toggle('hidden', !!apiKey);
         }
 
+        function onModelSelectChange() {
+            const sel = document.getElementById('modelSelect');
+            const custom = document.getElementById('customModelInput');
+            custom.style.display = sel.value === 'custom' ? 'block' : 'none';
+        }
+
         function openSettings() {
             document.getElementById('apiKeyInput').value = apiKey;
-            document.getElementById('modelSelect').value = model;
+            const sel = document.getElementById('modelSelect');
+            const knownValues = Array.from(sel.options).map(o => o.value).filter(v => v !== 'custom');
+            if (knownValues.includes(model)) {
+                sel.value = model;
+                document.getElementById('customModelInput').style.display = 'none';
+            } else {
+                sel.value = 'custom';
+                document.getElementById('customModelInput').style.display = 'block';
+                document.getElementById('customModelInput').value = model;
+            }
             document.getElementById('settingsModal').classList.remove('hidden');
         }
 
@@ -175,7 +194,12 @@
 
         function saveSettings() {
             apiKey = document.getElementById('apiKeyInput').value.trim();
-            model = document.getElementById('modelSelect').value;
+            const sel = document.getElementById('modelSelect');
+            if (sel.value === 'custom') {
+                model = document.getElementById('customModelInput').value.trim();
+            } else {
+                model = sel.value;
+            }
             localStorage.setItem('claudeApiKey', apiKey);
             localStorage.setItem('claudeModel', model);
             closeSettings();
