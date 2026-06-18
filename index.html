@@ -64,7 +64,13 @@
                     <p class="text-xs text-gray-400 mt-1.5">APIキーはこのブラウザにのみ保存されます（サーバー送信なし）</p>
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1.5">モデル</label>
+                    <div class="flex items-center justify-between mb-1.5">
+                        <label class="block text-sm font-medium text-gray-700">モデル</label>
+                        <button onclick="fetchModels()" id="fetchModelsBtn" class="text-xs text-green-600 hover:text-green-700 font-medium transition flex items-center gap-1">
+                            <svg id="fetchModelsSpin" class="w-3 h-3 hidden" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 12 6.477 12 12h-4z"/></svg>
+                            最新一覧を取得
+                        </button>
+                    </div>
                     <select id="modelSelect" onchange="onModelSelectChange()" class="w-full border border-gray-200 rounded-xl p-3 text-sm bg-white transition">
                         <option value="claude-opus-4-8">Claude Opus 4.8（最高品質・低速）</option>
                         <option value="claude-sonnet-4-6" selected>Claude Sonnet 4.6（バランス）</option>
@@ -73,7 +79,7 @@
                     </select>
                     <input type="text" id="customModelInput" placeholder="例: claude-opus-4-8" style="display:none"
                         class="w-full border border-gray-200 rounded-xl p-3 text-sm font-mono mt-2 transition">
-                    <p class="text-xs text-gray-400 mt-1.5">新しいモデルが出たら「カスタム」でモデルIDを直接入力できます</p>
+                    <p class="text-xs text-gray-400 mt-1.5">APIキーを入力後「最新一覧を取得」で自動更新できます</p>
                 </div>
             </div>
             <div class="flex gap-3 mt-6">
@@ -219,6 +225,41 @@
             document.getElementById('customModelInput').style.display = sel.value === 'custom' ? 'block' : 'none';
         }
 
+        async function fetchModels() {
+            const key = document.getElementById('apiKeyInput').value.trim() || apiKey;
+            if (!key) { showToast('先にAPIキーを入力してください'); return; }
+            const spin = document.getElementById('fetchModelsSpin');
+            const btn = document.getElementById('fetchModelsBtn');
+            spin.classList.add('spin');
+            spin.classList.remove('hidden');
+            btn.disabled = true;
+            try {
+                const res = await fetch('https://api.anthropic.com/v1/models', {
+                    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+                });
+                if (!res.ok) throw new Error(`${res.status}`);
+                const data = await res.json();
+                const sel = document.getElementById('modelSelect');
+                const current = sel.value === 'custom'
+                    ? document.getElementById('customModelInput').value.trim()
+                    : sel.value;
+                sel.innerHTML = data.data
+                    .filter(m => m.id.startsWith('claude-'))
+                    .sort((a, b) => (b.created_at || 0) - (a.created_at || 0))
+                    .map(m => `<option value="${m.id}">${m.display_name || m.id}</option>`)
+                    .join('') + '<option value="custom">カスタム（モデルIDを直接入力）</option>';
+                sel.value = Array.from(sel.options).some(o => o.value === current) ? current : sel.options[0].value;
+                onModelSelectChange();
+                showToast(`${data.data.length} 件のモデルを取得しました`);
+            } catch (e) {
+                showToast(`取得失敗: ${e.message}`);
+            } finally {
+                spin.classList.remove('spin');
+                spin.classList.add('hidden');
+                btn.disabled = false;
+            }
+        }
+
         function openSettings() {
             document.getElementById('apiKeyInput').value = apiKey;
             const sel = document.getElementById('modelSelect');
@@ -232,6 +273,7 @@
                 document.getElementById('customModelInput').value = model;
             }
             document.getElementById('settingsModal').classList.remove('hidden');
+            if (apiKey) fetchModels();
         }
 
         function closeSettings() {
