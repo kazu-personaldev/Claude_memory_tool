@@ -30,13 +30,22 @@
         .prose-response blockquote { border-left: 3px solid #e5e7eb; padding-left: 0.75em; color: #6b7280; margin: 0.5em 0; }
         .task-card { transition: box-shadow 0.15s ease; }
         .task-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-        textarea:focus { outline: none; box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.15); }
-        .btn-primary { background: linear-gradient(135deg, #f97316, #ea580c); }
-        .btn-primary:hover { background: linear-gradient(135deg, #ea580c, #c2410c); }
-        #settingsModal { backdrop-filter: blur(4px); }
+        textarea:focus { outline: none; box-shadow: 0 0 0 3px rgba(134, 210, 100, 0.2); }
+        .btn-primary { background: linear-gradient(135deg, #86d264, #5aad38); }
+        .btn-primary:hover { background: linear-gradient(135deg, #76c254, #4a9d28); }
+        #settingsModal, #historyPanel { backdrop-filter: blur(4px); }
+        .drawer { transform: translateX(100%); transition: transform 0.3s ease; }
+        .drawer.open { transform: translateX(0); }
+        .msg-user { background: linear-gradient(135deg, #86d264, #5aad38); color: white; border-radius: 18px 18px 4px 18px; }
+        .msg-assistant { background: #f3f4f6; color: #1f2937; border-radius: 18px 18px 18px 4px; }
+        .toast { transform: translateY(80px); opacity: 0; transition: all 0.3s ease; }
+        .toast.show { transform: translateY(0); opacity: 1; }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
+
+    <!-- Toast -->
+    <div id="toast" class="toast fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-4 py-2.5 rounded-full z-50 shadow-lg whitespace-nowrap pointer-events-none"></div>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -51,30 +60,39 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1.5">Anthropic API キー</label>
                     <input type="password" id="apiKeyInput" placeholder="sk-ant-api03-..."
-                        class="w-full border border-gray-200 rounded-xl p-3 text-sm font-mono focus:border-orange-400 transition">
-                    <p class="text-xs text-gray-400 mt-1.5">APIキーはブラウザのローカルストレージに保存されます（サーバー送信なし）</p>
+                        class="w-full border border-gray-200 rounded-xl p-3 text-sm font-mono transition">
+                    <p class="text-xs text-gray-400 mt-1.5">APIキーはこのブラウザにのみ保存されます（サーバー送信なし）</p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1.5">モデル</label>
-                    <select id="modelSelect" onchange="onModelSelectChange()" class="w-full border border-gray-200 rounded-xl p-3 text-sm bg-white focus:border-orange-400 transition">
+                    <select id="modelSelect" onchange="onModelSelectChange()" class="w-full border border-gray-200 rounded-xl p-3 text-sm bg-white transition">
                         <option value="claude-opus-4-8">Claude Opus 4.8（最高品質・低速）</option>
                         <option value="claude-sonnet-4-6" selected>Claude Sonnet 4.6（バランス）</option>
                         <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5（高速・低コスト）</option>
                         <option value="custom">カスタム（モデルIDを直接入力）</option>
                     </select>
                     <input type="text" id="customModelInput" placeholder="例: claude-opus-4-8" style="display:none"
-                        class="w-full border border-gray-200 rounded-xl p-3 text-sm font-mono mt-2 focus:border-orange-400 transition">
+                        class="w-full border border-gray-200 rounded-xl p-3 text-sm font-mono mt-2 transition">
                     <p class="text-xs text-gray-400 mt-1.5">新しいモデルが出たら「カスタム」でモデルIDを直接入力できます</p>
                 </div>
             </div>
             <div class="flex gap-3 mt-6">
-                <button onclick="saveSettings()" class="flex-1 btn-primary text-white py-3 rounded-xl text-sm font-semibold transition">
-                    保存
-                </button>
-                <button onclick="closeSettings()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl text-sm font-semibold transition">
-                    キャンセル
+                <button onclick="saveSettings()" class="flex-1 btn-primary text-white py-3 rounded-xl text-sm font-semibold transition">保存</button>
+                <button onclick="closeSettings()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-3 rounded-xl text-sm font-semibold transition">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- History Drawer -->
+    <div id="historyPanel" class="hidden fixed inset-0 bg-black bg-opacity-50 z-40" onclick="closeHistory()">
+        <div id="historyDrawer" class="drawer absolute right-0 top-0 h-full w-full max-w-lg bg-white shadow-2xl flex flex-col" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                <h2 class="font-bold text-gray-900">実行履歴</h2>
+                <button onclick="closeHistory()" class="p-2 hover:bg-gray-100 rounded-xl text-gray-400">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
             </div>
+            <div id="historyList" class="flex-1 overflow-y-auto p-4 space-y-3"></div>
         </div>
     </div>
 
@@ -82,8 +100,8 @@
     <header class="bg-white border-b border-gray-100 px-4 py-3.5 flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <div class="flex items-center gap-2.5">
             <div class="w-8 h-8 btn-primary rounded-xl flex items-center justify-center shadow-sm">
-                <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/>
+                <svg class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
                 </svg>
             </div>
             <div>
@@ -91,12 +109,20 @@
                 <p class="text-xs text-gray-400 leading-tight">クレジット回復後に実行</p>
             </div>
         </div>
-        <button onclick="openSettings()" class="p-2.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition">
-            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-            </svg>
-        </button>
+        <div class="flex items-center gap-1">
+            <button onclick="openHistory()" class="relative p-2.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition">
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <span id="historyBadge" class="hidden absolute top-1.5 right-1.5 w-2 h-2 bg-green-500 rounded-full"></span>
+            </button>
+            <button onclick="openSettings()" class="p-2.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition">
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                </svg>
+            </button>
+        </div>
     </header>
 
     <!-- Main Content -->
@@ -117,27 +143,21 @@
         <!-- Task Input -->
         <div class="bg-white rounded-2xl border border-gray-100 p-4 mb-5 shadow-sm">
             <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">新しいタスクを追加</p>
-            <textarea
-                id="taskInput"
-                placeholder="Claudeに頼みたいことを書いておく...&#10;（⌘+Enter で登録）"
-                class="w-full border border-gray-200 rounded-xl p-3.5 text-sm resize-none transition"
-                rows="4"
-            ></textarea>
+            <textarea id="taskInput" placeholder="Claudeに頼みたいことを書いておく...&#10;（⌘+Enter で登録）"
+                class="w-full border border-gray-200 rounded-xl p-3.5 text-sm resize-none transition" rows="4"></textarea>
             <div class="flex items-center justify-between mt-3">
                 <span class="text-xs text-gray-400">データはこのブラウザに保存されます</span>
-                <button onclick="addTask()" id="addBtn" class="btn-primary text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition flex items-center gap-2 shadow-sm">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/>
-                    </svg>
+                <button onclick="addTask()" class="btn-primary text-white px-5 py-2.5 rounded-xl text-sm font-semibold transition flex items-center gap-2 shadow-sm">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"/></svg>
                     登録
                 </button>
             </div>
         </div>
 
-        <!-- Task count & clear all -->
+        <!-- Task header -->
         <div id="taskHeader" class="hidden flex items-center justify-between mb-3">
             <p class="text-sm font-semibold text-gray-500"><span id="taskCount">0</span> 件のタスク</p>
-            <button onclick="clearDone()" class="text-xs text-gray-400 hover:text-red-500 transition">完了済みを削除</button>
+            <button onclick="archiveDone()" class="text-xs text-gray-400 hover:text-green-600 transition">完了済みを履歴へ</button>
         </div>
 
         <!-- Task List -->
@@ -157,33 +177,48 @@
     </main>
 
     <script>
-        let tasks = JSON.parse(localStorage.getItem('claudeTasks') || '[]');
+        let tasks = migrateTasks(JSON.parse(localStorage.getItem('claudeTasks') || '[]'));
+        let history = JSON.parse(localStorage.getItem('claudeHistory') || '[]');
         let apiKey = localStorage.getItem('claudeApiKey') || '';
         let model = localStorage.getItem('claudeModel') || 'claude-sonnet-4-6';
+
+        function migrateTasks(arr) {
+            return arr.map(t => {
+                if (t.messages) return t;
+                const msgs = [{ role: 'user', content: t.text || '' }];
+                if (t.response) msgs.push({ role: 'assistant', content: t.response });
+                return { id: t.id, createdAt: t.createdAt, status: t.status, messages: msgs };
+            });
+        }
 
         function init() {
             checkApiKey();
             renderTasks();
+            updateHistoryBadge();
             document.getElementById('taskInput').addEventListener('keydown', e => {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') addTask();
             });
         }
 
-        function checkApiKey() {
-            document.getElementById('apiKeyWarning').classList.toggle('hidden', !!apiKey);
+        let toastTimer;
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
         }
 
         function onModelSelectChange() {
             const sel = document.getElementById('modelSelect');
-            const custom = document.getElementById('customModelInput');
-            custom.style.display = sel.value === 'custom' ? 'block' : 'none';
+            document.getElementById('customModelInput').style.display = sel.value === 'custom' ? 'block' : 'none';
         }
 
         function openSettings() {
             document.getElementById('apiKeyInput').value = apiKey;
             const sel = document.getElementById('modelSelect');
-            const knownValues = Array.from(sel.options).map(o => o.value).filter(v => v !== 'custom');
-            if (knownValues.includes(model)) {
+            const known = Array.from(sel.options).map(o => o.value).filter(v => v !== 'custom');
+            if (known.includes(model)) {
                 sel.value = model;
                 document.getElementById('customModelInput').style.display = 'none';
             } else {
@@ -201,15 +236,90 @@
         function saveSettings() {
             apiKey = document.getElementById('apiKeyInput').value.trim();
             const sel = document.getElementById('modelSelect');
-            if (sel.value === 'custom') {
-                model = document.getElementById('customModelInput').value.trim();
-            } else {
-                model = sel.value;
-            }
+            model = sel.value === 'custom' ? document.getElementById('customModelInput').value.trim() : sel.value;
             localStorage.setItem('claudeApiKey', apiKey);
             localStorage.setItem('claudeModel', model);
             closeSettings();
             checkApiKey();
+        }
+
+        function checkApiKey() {
+            document.getElementById('apiKeyWarning').classList.toggle('hidden', !!apiKey);
+        }
+
+        function openHistory() {
+            renderHistory();
+            document.getElementById('historyPanel').classList.remove('hidden');
+            setTimeout(() => document.getElementById('historyDrawer').classList.add('open'), 10);
+        }
+
+        function closeHistory() {
+            document.getElementById('historyDrawer').classList.remove('open');
+            setTimeout(() => document.getElementById('historyPanel').classList.add('hidden'), 300);
+        }
+
+        function updateHistoryBadge() {
+            document.getElementById('historyBadge').classList.toggle('hidden', history.length === 0);
+        }
+
+        function archiveTask(id) {
+            const task = tasks.find(t => t.id === id);
+            if (!task) return;
+            const hasResponse = task.messages.some(m => m.role === 'assistant');
+            if (hasResponse) {
+                history.unshift({ id: task.id, archivedAt: new Date().toISOString(), messages: task.messages });
+                saveHistory();
+                updateHistoryBadge();
+                showToast('履歴に保存しました');
+            }
+            tasks = tasks.filter(t => t.id !== id);
+            saveTasks();
+            renderTasks();
+        }
+
+        function archiveDone() {
+            const done = tasks.filter(t => t.status === 'done');
+            if (done.length === 0) return;
+            done.forEach(task => history.unshift({ id: task.id, archivedAt: new Date().toISOString(), messages: task.messages }));
+            tasks = tasks.filter(t => t.status !== 'done');
+            saveHistory();
+            saveTasks();
+            updateHistoryBadge();
+            renderTasks();
+            showToast(`${done.length} 件を履歴に保存しました`);
+        }
+
+        function deleteHistory(id) {
+            history = history.filter(h => h.id !== id);
+            saveHistory();
+            updateHistoryBadge();
+            renderHistory();
+        }
+
+        function clearHistory() {
+            if (!confirm('履歴をすべて削除しますか？')) return;
+            history = [];
+            saveHistory();
+            updateHistoryBadge();
+            renderHistory();
+        }
+
+        function saveHistory() { localStorage.setItem('claudeHistory', JSON.stringify(history)); }
+
+        function renderHistory() {
+            const list = document.getElementById('historyList');
+            if (history.length === 0) {
+                list.innerHTML = `<div class="text-center py-12 text-gray-400"><svg class="w-10 h-10 mx-auto mb-3 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><p class="text-sm">履歴がありません</p><p class="text-xs mt-1">完了済みタスクを削除するとここに保存されます</p></div>`;
+                return;
+            }
+            list.innerHTML = `<div class="flex justify-end mb-1"><button onclick="clearHistory()" class="text-xs text-gray-300 hover:text-red-400 transition">すべて削除</button></div>${history.map(h => {
+                const firstMsg = h.messages[0]?.content || '';
+                const title = firstMsg.length > 60 ? firstMsg.slice(0, 60) + '…' : firstMsg;
+                const d = new Date(h.archivedAt);
+                const dateStr = `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                const turns = Math.floor(h.messages.length / 2);
+                return `<details class="bg-gray-50 rounded-2xl overflow-hidden group"><summary class="flex items-start gap-3 p-4 cursor-pointer list-none"><div class="flex-1 min-w-0"><p class="text-sm text-gray-800 font-medium truncate">${escHtml(title)}</p><p class="text-xs text-gray-400 mt-1">${dateStr}・${turns} ターン</p></div><div class="flex items-center gap-2 flex-shrink-0"><button onclick="event.preventDefault();event.stopPropagation();deleteHistory(${h.id})" class="text-gray-300 hover:text-red-400 transition p-1"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button><svg class="w-4 h-4 text-gray-300 group-open:rotate-180 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg></div></summary><div class="px-4 pb-4 space-y-2 border-t border-gray-200 pt-3">${h.messages.map(m => `<div class="flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}"><div class="${m.role === 'user' ? 'msg-user' : 'msg-assistant'} px-3.5 py-2.5 text-sm max-w-[85%] prose-response">${m.role === 'user' ? escHtml(m.content) : renderMarkdown(m.content)}</div></div>`).join('')}</div></details>`;
+            }).join('')}`;
         }
 
         function addTask() {
@@ -220,244 +330,104 @@
                 setTimeout(() => input.classList.remove('border-red-300'), 1000);
                 return;
             }
-            tasks.unshift({
-                id: Date.now(),
-                text,
-                createdAt: new Date().toISOString(),
-                status: 'pending',
-                response: null,
-            });
+            tasks.unshift({ id: Date.now(), createdAt: new Date().toISOString(), status: 'pending', messages: [{ role: 'user', content: text }] });
             saveTasks();
             renderTasks();
             input.value = '';
             input.focus();
         }
 
-        function deleteTask(id) {
-            if (!confirm('このタスクを削除しますか？')) return;
-            tasks = tasks.filter(t => t.id !== id);
-            saveTasks();
-            renderTasks();
-        }
-
-        function clearDone() {
-            const count = tasks.filter(t => t.status === 'done').length;
-            if (count === 0) return;
-            if (!confirm(`完了済み ${count} 件を削除しますか？`)) return;
-            tasks = tasks.filter(t => t.status !== 'done');
-            saveTasks();
-            renderTasks();
-        }
-
-        function resetTask(id) {
-            const task = tasks.find(t => t.id === id);
-            if (!task) return;
-            task.status = 'pending';
-            task.response = null;
-            saveTasks();
-            renderTasks();
-        }
-
-        function saveTasks() {
-            localStorage.setItem('claudeTasks', JSON.stringify(tasks));
-        }
+        function saveTasks() { localStorage.setItem('claudeTasks', JSON.stringify(tasks)); }
 
         async function executeTask(id) {
             if (!apiKey) { openSettings(); return; }
             const task = tasks.find(t => t.id === id);
             if (!task || task.status === 'running') return;
-
             task.status = 'running';
-            task.response = null;
             saveTasks();
             renderTasks();
-
             try {
                 const res = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-api-key': apiKey,
-                        'anthropic-version': '2023-06-01',
-                        'anthropic-dangerous-direct-browser-access': 'true',
-                    },
-                    body: JSON.stringify({
-                        model,
-                        max_tokens: 8096,
-                        messages: [{ role: 'user', content: task.text }],
-                    }),
+                    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+                    body: JSON.stringify({ model, max_tokens: 8096, messages: task.messages }),
                 });
-
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.error?.message || `HTTPエラー ${res.status}`);
-                }
-
+                if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error?.message || `HTTPエラー ${res.status}`); }
                 const data = await res.json();
-                task.response = data.content[0].text;
+                task.messages.push({ role: 'assistant', content: data.content[0].text });
                 task.status = 'done';
             } catch (err) {
-                task.response = err.message;
+                task.messages.push({ role: 'assistant', content: `⚠️ ${err.message}` });
                 task.status = 'error';
             }
-
             saveTasks();
             renderTasks();
+        }
+
+        async function sendReply(id) {
+            const input = document.getElementById(`reply-${id}`);
+            const text = input?.value.trim();
+            if (!text) return;
+            const task = tasks.find(t => t.id === id);
+            if (!task) return;
+            task.messages.push({ role: 'user', content: text });
+            task.status = 'running';
+            input.value = '';
+            saveTasks();
+            renderTasks();
+            await executeTask(id);
         }
 
         async function executeAll() {
             const pending = tasks.filter(t => t.status === 'pending' || t.status === 'error');
-            if (pending.length === 0) return;
+            if (!pending.length) return;
             if (!apiKey) { openSettings(); return; }
-            for (const task of pending) {
-                await executeTask(task.id);
-            }
+            for (const task of pending) await executeTask(task.id);
         }
 
-        function copyToClipboard(id) {
-            const task = tasks.find(t => t.id === id);
-            if (!task?.response) return;
-            navigator.clipboard.writeText(task.response).then(() => {
-                const btn = document.getElementById('copy-' + id);
-                if (btn) { btn.textContent = 'コピー済み ✓'; setTimeout(() => { btn.textContent = 'コピー'; }, 2000); }
-            });
-        }
-
-        function renderMarkdown(text) {
-            return text
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                .replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
-                    `<pre><code>${code.trim()}</code></pre>`)
-                .replace(/`([^`]+)`/g, '<code>$1</code>')
-                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-                .replace(/\*(.+?)\*/g, '<em>$1</em>')
-                .replace(/^#{3} (.+)$/gm, '<h3>$1</h3>')
-                .replace(/^#{2} (.+)$/gm, '<h2>$1</h2>')
-                .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-                .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
-                .replace(/^\s*[-*] (.+)$/gm, '<li>$1</li>')
-                .replace(/((<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>')
-                .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-                .replace(/\n\n/g, '</p><p>')
-                .replace(/^(?!<[hup]|<li|<blockquote|<pre)(.+)$/gm, '$1')
-                .replace(/^<\/p><p>(<[hup]|<li|<blockquote|<pre)/gm, '$1');
-        }
+        function copyMsg(text) { navigator.clipboard.writeText(text).then(() => showToast('コピーしました')); }
 
         function renderTasks() {
             const list = document.getElementById('taskList');
             const empty = document.getElementById('emptyState');
             const header = document.getElementById('taskHeader');
-            const countEl = document.getElementById('taskCount');
-
-            if (tasks.length === 0) {
-                list.innerHTML = '';
-                empty.classList.remove('hidden');
-                header.classList.add('hidden');
-                return;
-            }
-
+            if (tasks.length === 0) { list.innerHTML = ''; empty.classList.remove('hidden'); header.classList.add('hidden'); return; }
             empty.classList.add('hidden');
             header.classList.remove('hidden');
-            countEl.textContent = tasks.length;
-
+            document.getElementById('taskCount').textContent = tasks.length;
             const pendingCount = tasks.filter(t => t.status === 'pending' || t.status === 'error').length;
-
-            list.innerHTML = `
-                ${pendingCount > 1 ? `
-                    <button onclick="executeAll()" class="w-full btn-primary text-white py-3 rounded-xl text-sm font-semibold transition shadow-sm flex items-center justify-center gap-2 mb-1">
-                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                        すべて実行（${pendingCount} 件）
-                    </button>
-                ` : ''}
-                ${tasks.map(task => renderTaskCard(task)).join('')}
-            `;
+            list.innerHTML = `${pendingCount > 1 ? `<button onclick="executeAll()" class="w-full btn-primary text-white py-3 rounded-xl text-sm font-semibold shadow-sm flex items-center justify-center gap-2 mb-1"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>すべて実行（${pendingCount} 件）</button>` : ''}${tasks.map(task => renderTaskCard(task)).join('')}`;
         }
 
         function renderTaskCard(task) {
-            const statusMap = {
-                pending: { label: '待機中', cls: 'bg-gray-100 text-gray-500' },
-                running: { label: '実行中', cls: 'bg-blue-100 text-blue-600' },
-                done:    { label: '完了',   cls: 'bg-green-100 text-green-600' },
-                error:   { label: 'エラー', cls: 'bg-red-100 text-red-600' },
-            };
+            const statusMap = { pending: { label: '待機中', cls: 'bg-gray-100 text-gray-500' }, running: { label: '実行中', cls: 'bg-blue-100 text-blue-600' }, done: { label: '完了', cls: 'bg-green-100 text-green-600' }, error: { label: 'エラー', cls: 'bg-red-100 text-red-600' } };
             const s = statusMap[task.status];
-            const date = new Date(task.createdAt);
-            const dateStr = `${date.getMonth()+1}/${date.getDate()} ${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
-
-            return `
-                <div class="task-card bg-white rounded-2xl border border-gray-100 p-4 shadow-sm">
-                    <div class="flex items-start gap-3 mb-3">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-sm text-gray-800 whitespace-pre-wrap break-words leading-relaxed">${escHtml(task.text)}</p>
-                            <p class="text-xs text-gray-300 mt-1.5">${dateStr}</p>
-                        </div>
-                        <span class="flex-shrink-0 text-xs px-2.5 py-1 rounded-full font-medium ${s.cls}">${s.label}</span>
-                    </div>
-
-                    <div class="flex gap-2">
-                        ${task.status === 'pending' || task.status === 'error' ? `
-                            <button onclick="executeTask(${task.id})"
-                                class="flex-1 btn-primary text-white py-2.5 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-1.5 shadow-sm">
-                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                                </svg>
-                                実行
-                            </button>
-                        ` : ''}
-                        ${task.status === 'running' ? `
-                            <div class="flex-1 bg-blue-50 text-blue-600 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2">
-                                <svg class="spin w-4 h-4" fill="none" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 12 6.477 12 12h-4z"/>
-                                </svg>
-                                実行中...
-                            </div>
-                        ` : ''}
-                        ${task.status === 'done' ? `
-                            <button onclick="resetTask(${task.id})"
-                                class="bg-gray-100 hover:bg-gray-200 text-gray-600 py-2.5 px-4 rounded-xl text-sm font-semibold transition">
-                                再実行
-                            </button>
-                        ` : ''}
-                        <button onclick="deleteTask(${task.id})"
-                            class="bg-gray-100 hover:bg-red-50 hover:text-red-500 text-gray-400 py-2.5 px-3.5 rounded-xl transition">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                            </svg>
-                        </button>
-                    </div>
-
-                    ${task.response ? `
-                        <div class="mt-3 rounded-xl overflow-hidden border ${task.status === 'error' ? 'border-red-200 bg-red-50' : 'border-gray-100 bg-gray-50'}">
-                            <div class="px-4 py-2.5 border-b ${task.status === 'error' ? 'border-red-200 bg-red-100' : 'border-gray-100 bg-white'} flex items-center justify-between">
-                                <p class="text-xs font-semibold ${task.status === 'error' ? 'text-red-600' : 'text-gray-400'}">
-                                    ${task.status === 'error' ? 'エラー' : 'Claude の返答'}
-                                </p>
-                                ${task.status === 'done' ? `
-                                    <button id="copy-${task.id}" onclick="copyToClipboard(${task.id})"
-                                        class="text-xs text-gray-400 hover:text-gray-700 transition font-medium">
-                                        コピー
-                                    </button>
-                                ` : ''}
-                            </div>
-                            <div class="px-4 py-3 text-sm ${task.status === 'error' ? 'text-red-700' : 'text-gray-700'} prose-response">
-                                ${task.status === 'error' ? escHtml(task.response) : renderMarkdown(task.response)}
-                            </div>
-                        </div>
-                    ` : ''}
-                </div>
-            `;
+            const d = new Date(task.createdAt);
+            const dateStr = `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+            const hasResponse = task.messages.some(m => m.role === 'assistant');
+            return `<div class="task-card bg-white rounded-2xl border border-gray-100 p-4 shadow-sm"><div class="flex items-center justify-between mb-3"><p class="text-xs text-gray-300">${dateStr}</p><span class="text-xs px-2.5 py-1 rounded-full font-medium ${s.cls}">${s.label}</span></div><div class="space-y-2.5 mb-3">${task.messages.map(m => `<div class="flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} gap-2 items-end"><div class="${m.role === 'user' ? 'msg-user' : 'msg-assistant'} px-3.5 py-2.5 text-sm max-w-[85%] prose-response">${m.role === 'user' ? escHtml(m.content) : renderMarkdown(m.content)}</div><button onclick="copyMsg(${JSON.stringify(m.content)})" class="flex-shrink-0 text-gray-200 hover:text-gray-400 transition mb-1"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button></div>`).join('')}</div>${task.status === 'running' ? `<div class="flex justify-start mb-3"><div class="msg-assistant px-4 py-2.5 flex items-center gap-2 text-gray-400 text-sm"><svg class="spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 12 6.477 12 12h-4z"/></svg>考え中...</div></div>` : ''}${(task.status === 'done' || task.status === 'error') && hasResponse ? `<div class="flex gap-2 mt-1"><textarea id="reply-${task.id}" placeholder="返信する..." class="flex-1 border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm resize-none transition" rows="2" onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter')sendReply(${task.id})"></textarea><button onclick="sendReply(${task.id})" class="btn-primary text-white px-3.5 rounded-xl flex items-center justify-center self-end py-2.5 flex-shrink-0 shadow-sm"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg></button></div>` : ''}<div class="flex gap-2 mt-3">${task.status === 'pending' ? `<button onclick="executeTask(${task.id})" class="flex-1 btn-primary text-white py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 shadow-sm"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>実行</button>` : ''}${task.status === 'done' ? `<button onclick="archiveTask(${task.id})" class="flex-1 bg-gray-100 hover:bg-green-50 hover:text-green-600 text-gray-500 py-2.5 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-1.5"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>履歴へ</button>` : ''}${task.status === 'error' ? `<button onclick="executeTask(${task.id})" class="flex-1 bg-red-50 text-red-500 hover:bg-red-100 py-2.5 rounded-xl text-sm font-semibold transition">再実行</button>` : ''}<button onclick="archiveTask(${task.id})" class="bg-gray-100 hover:bg-red-50 hover:text-red-400 text-gray-300 py-2.5 px-3.5 rounded-xl transition"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button></div></div>`;
         }
 
-        function escHtml(str) {
-            return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        function renderMarkdown(text) {
+            return text
+                .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                .replace(/```[\w]*\n([\s\S]*?)```/g, (_,c) => `<pre><code>${c.trim()}</code></pre>`)
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/^#{3} (.+)$/gm,'<h3>$1</h3>')
+                .replace(/^#{2} (.+)$/gm,'<h2>$1</h2>')
+                .replace(/^# (.+)$/gm,'<h1>$1</h1>')
+                .replace(/^> (.+)$/gm,'<blockquote>$1</blockquote>')
+                .replace(/^\s*[-*] (.+)$/gm,'<li>$1</li>')
+                .replace(/((<li>.*<\/li>\n?)+)/g,'<ul>$1<\/ul>')
+                .replace(/\n\n/g,'<\/p><p>');
         }
+
+        function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
         document.addEventListener('DOMContentLoaded', init);
-        document.getElementById('settingsModal').addEventListener('click', e => {
-            if (e.target === document.getElementById('settingsModal')) closeSettings();
-        });
+        document.getElementById('settingsModal').addEventListener('click', e => { if (e.target === document.getElementById('settingsModal')) closeSettings(); });
     </script>
 </body>
 </html>
