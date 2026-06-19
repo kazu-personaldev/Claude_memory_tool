@@ -179,7 +179,13 @@
 
         function migrateTasks(arr) {
             return arr.map(t => {
-                if (t.messages) return t;
+                if (t.messages) {
+                    const msgs = t.messages.map(m =>
+                        (m.role === 'assistant' && m.content?.startsWith('⚠️') && !m.isError)
+                            ? { ...m, isError: true } : m
+                    );
+                    return { ...t, messages: msgs };
+                }
                 const msgs = [{ role: 'user', content: t.text || '' }];
                 if (t.response) msgs.push({ role: 'assistant', content: t.response });
                 return { id: t.id, createdAt: t.createdAt, status: t.status, messages: msgs };
@@ -351,17 +357,20 @@
             if (!task || task.status === 'running') return;
             task.status = 'running'; saveTasks(); renderTasks();
             try {
+                const apiMessages = task.messages.filter(m => !m.isError);
                 const res = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-                    body: JSON.stringify({ model, max_tokens: 8096, messages: task.messages }),
+                    body: JSON.stringify({ model, max_tokens: 8096, messages: apiMessages }),
                 });
                 if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.error?.message || `HTTP ${res.status}`); }
                 const data = await res.json();
+                task.messages = task.messages.filter(m => !m.isError);
                 task.messages.push({ role: 'assistant', content: data.content[0].text });
                 task.status = 'done';
             } catch (err) {
-                task.messages.push({ role: 'assistant', content: `⚠️ ${err.message}` });
+                task.messages = task.messages.filter(m => !m.isError);
+                task.messages.push({ role: 'assistant', content: `⚠️ ${err.message}`, isError: true });
                 task.status = 'error';
             }
             saveTasks(); renderTasks();
