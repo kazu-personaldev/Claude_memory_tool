@@ -13,6 +13,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        html, body { overflow-x: hidden; max-width: 100%; }
         body { font-family: 'Inter', sans-serif; }
         .spin { animation: spin 1s linear infinite; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -23,9 +24,9 @@
         .prose-response p { margin: 0.5em 0; line-height: 1.65; }
         .prose-response ul, .prose-response ol { margin: 0.5em 0 0.5em 1.25em; }
         .prose-response li { margin: 0.25em 0; line-height: 1.6; }
-        .prose-response code { background: #f3f4f6; padding: 0.1em 0.35em; border-radius: 0.25em; font-size: 0.85em; font-family: monospace; }
-        .prose-response pre { background: #1e1e2e; color: #cdd6f4; padding: 0.75em 1em; border-radius: 0.5em; overflow-x: auto; margin: 0.75em 0; }
-        .prose-response pre code { background: none; padding: 0; color: inherit; font-size: 0.85em; }
+        .prose-response code { background: #f3f4f6; padding: 0.1em 0.35em; border-radius: 0.25em; font-size: 0.85em; font-family: monospace; word-break: break-all; }
+        .prose-response pre { background: #1e1e2e; color: #cdd6f4; padding: 0.75em 1em; border-radius: 0.5em; overflow-x: auto; margin: 0.75em 0; max-width: 100%; }
+        .prose-response pre code { background: none; padding: 0; color: inherit; font-size: 0.85em; word-break: normal; }
         .prose-response strong { font-weight: 600; }
         .prose-response blockquote { border-left: 3px solid #e5e7eb; padding-left: 0.75em; color: #6b7280; margin: 0.5em 0; }
         .task-card { transition: box-shadow 0.15s ease; }
@@ -36,8 +37,8 @@
         #settingsModal, #historyPanel { backdrop-filter: blur(4px); }
         .drawer { transform: translateX(100%); transition: transform 0.3s ease; }
         .drawer.open { transform: translateX(0); }
-        .msg-user { background: linear-gradient(135deg, #86d264, #5aad38); color: white; border-radius: 18px 18px 4px 18px; }
-        .msg-assistant { background: #f3f4f6; color: #1f2937; border-radius: 18px 18px 18px 4px; }
+        .msg-user { background: linear-gradient(135deg, #86d264, #5aad38); color: white; border-radius: 18px 18px 4px 18px; overflow-wrap: break-word; word-break: break-word; min-width: 0; }
+        .msg-assistant { background: #f3f4f6; color: #1f2937; border-radius: 18px 18px 18px 4px; overflow-wrap: break-word; word-break: break-word; min-width: 0; }
         .toast { transform: translateY(80px); opacity: 0; transition: all 0.3s ease; }
         .toast.show { transform: translateY(0); opacity: 1; }
     </style>
@@ -176,6 +177,30 @@
         let history = JSON.parse(localStorage.getItem('claudeHistory') || '[]');
         let apiKey = localStorage.getItem('claudeApiKey') || '';
         let model = localStorage.getItem('claudeModel') || 'claude-sonnet-4-6';
+        let wakeLock = null;
+
+        async function acquireWakeLock() {
+            if (!('wakeLock' in navigator)) return;
+            try { wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
+        }
+
+        function releaseWakeLockIfIdle() {
+            if (tasks.some(t => t.status === 'running')) return;
+            if (wakeLock) { wakeLock.release(); wakeLock = null; }
+        }
+
+        async function requestNotifPermission() {
+            if ('Notification' in window && Notification.permission === 'default') {
+                await Notification.requestPermission();
+            }
+        }
+
+        function notifyIfHidden(msg) {
+            if (!document.hidden) return;
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification('Claude タスクメモ', { body: msg, icon: '/icon-192.png' });
+            }
+        }
 
         function migrateTasks(arr) {
             return arr.map(t => {
@@ -192,6 +217,12 @@
             updateHistoryBadge();
             document.getElementById('taskInput').addEventListener('keydown', e => {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') addTask();
+            });
+            requestNotifPermission();
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && wakeLock === null && tasks.some(t => t.status === 'running')) {
+                    acquireWakeLock();
+                }
             });
         }
 
@@ -350,6 +381,7 @@
             const task = tasks.find(t => t.id === id);
             if (!task || task.status === 'running') return;
             task.status = 'running'; saveTasks(); renderTasks();
+            await acquireWakeLock();
             try {
                 const res = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
@@ -360,11 +392,14 @@
                 const data = await res.json();
                 task.messages.push({ role: 'assistant', content: data.content[0].text });
                 task.status = 'done';
+                notifyIfHidden('タスクが完了しました');
             } catch (err) {
                 task.messages.push({ role: 'assistant', content: `⚠️ ${err.message}` });
                 task.status = 'error';
+                notifyIfHidden('タスクでエラーが発生しました');
             }
             saveTasks(); renderTasks();
+            releaseWakeLockIfIdle();
         }
 
         async function sendReply(id) {
