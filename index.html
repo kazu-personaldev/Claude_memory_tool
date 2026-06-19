@@ -176,6 +176,7 @@
         let history = JSON.parse(localStorage.getItem('claudeHistory') || '[]');
         let apiKey = localStorage.getItem('claudeApiKey') || '';
         let model = localStorage.getItem('claudeModel') || 'claude-sonnet-4-6';
+        const abortControllers = new Map();
 
         function migrateTasks(arr) {
             return arr.map(t => {
@@ -199,6 +200,18 @@
             document.getElementById('taskInput').addEventListener('keydown', e => {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') addTask();
             });
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('./sw.js').then(reg => {
+                    reg.addEventListener('updatefound', () => {
+                        const w = reg.installing;
+                        w.addEventListener('statechange', () => {
+                            if (w.state === 'installed' && navigator.serviceWorker.controller) {
+                                showToast('アプリを更新しました。再読み込みで反映されます');
+                            }
+                        });
+                    });
+                });
+            }
         }
 
         let toastTimer;
@@ -356,12 +369,15 @@
             const task = tasks.find(t => t.id === id);
             if (!task || task.status === 'running') return;
             task.status = 'running'; saveTasks(); renderTasks();
+            const controller = new AbortController();
+            abortControllers.set(id, controller);
             try {
                 const apiMessages = task.messages.filter(m => !m.isError);
                 const res = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
                     body: JSON.stringify({ model, max_tokens: 8096, messages: apiMessages }),
+                    signal: controller.signal,
                 });
                 if (!res.ok) { const err = await res.json().catch(()=>({})); throw new Error(err.error?.message || `HTTP ${res.status}`); }
                 const data = await res.json();
@@ -369,11 +385,23 @@
                 task.messages.push({ role: 'assistant', content: data.content[0].text });
                 task.status = 'done';
             } catch (err) {
-                task.messages = task.messages.filter(m => !m.isError);
-                task.messages.push({ role: 'assistant', content: `⚠️ ${err.message}`, isError: true });
-                task.status = 'error';
+                if (err.name === 'AbortError') {
+                    task.status = 'pending';
+                    showToast('実行を中断しました');
+                } else {
+                    task.messages = task.messages.filter(m => !m.isError);
+                    task.messages.push({ role: 'assistant', content: `⚠️ ${err.message}`, isError: true });
+                    task.status = 'error';
+                }
+            } finally {
+                abortControllers.delete(id);
             }
             saveTasks(); renderTasks();
+        }
+
+        function abortTask(id) {
+            const controller = abortControllers.get(id);
+            if (controller) controller.abort();
         }
 
         async function sendReply(id) {
@@ -383,8 +411,7 @@
             const task = tasks.find(t => t.id === id);
             if (!task) return;
             task.messages.push({ role: 'user', content: text });
-            task.status = 'running';
-            input.value = ''; saveTasks(); renderTasks();
+            input.value = ''; saveTasks();
             await executeTask(id);
         }
 
@@ -414,7 +441,7 @@
             const d = new Date(task.createdAt);
             const ds = `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
             const hasResp = task.messages.some(m => m.role === 'assistant');
-            return `<div class="task-card bg-white rounded-2xl border border-gray-100 p-4 shadow-sm"><div class="flex items-center justify-between mb-3"><p class="text-xs text-gray-300">${ds}</p><span class="text-xs px-2.5 py-1 rounded-full font-medium ${s.cls}">${s.label}</span></div><div class="space-y-2.5 mb-3">${task.messages.map(m=>`<div class="flex ${m.role==='user'?'justify-end':'justify-start'} gap-2 items-end"><div class="${m.role==='user'?'msg-user':'msg-assistant'} px-3.5 py-2.5 text-sm max-w-[85%] prose-response">${m.role==='user'?escHtml(m.content):renderMarkdown(m.content)}</div><button onclick="copyMsg(${JSON.stringify(m.content)})" class="flex-shrink-0 text-gray-200 hover:text-gray-400 transition mb-1"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button></div>`).join('')}</div>${task.status==='running'?`<div class="flex justify-start mb-3"><div class="msg-assistant px-4 py-2.5 flex items-center gap-2 text-gray-400 text-sm"><svg class="spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 12 6.477 12 12h-4z"/></svg>考え中...</div></div>`:''  }${(task.status==='done'||task.status==='error')&&hasResp?`<div class="flex gap-2 mt-1"><textarea id="reply-${task.id}" placeholder="返信する..." class="flex-1 border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm resize-none transition" rows="2" onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter')sendReply(${task.id})"></textarea><button onclick="sendReply(${task.id})" class="btn-primary text-white px-3.5 rounded-xl flex items-center justify-center self-end py-2.5 flex-shrink-0 shadow-sm"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg></button></div>`:''}<div class="flex gap-2 mt-3">${task.status==='pending'?`<button onclick="executeTask(${task.id})" class="flex-1 btn-primary text-white py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 shadow-sm"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>実行</button>`:''  }${task.status==='done'?`<button onclick="archiveTask(${task.id})" class="flex-1 bg-gray-100 hover:bg-green-50 hover:text-green-600 text-gray-500 py-2.5 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-1.5"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>履歴へ</button>`:''  }${task.status==='error'?`<button onclick="executeTask(${task.id})" class="flex-1 bg-red-50 text-red-500 hover:bg-red-100 py-2.5 rounded-xl text-sm font-semibold transition">再実行</button>`:''  }<button onclick="archiveTask(${task.id})" class="bg-gray-100 hover:bg-red-50 hover:text-red-400 text-gray-300 py-2.5 px-3.5 rounded-xl transition"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button></div></div>`;
+            return `<div class="task-card bg-white rounded-2xl border border-gray-100 p-4 shadow-sm"><div class="flex items-center justify-between mb-3"><p class="text-xs text-gray-300">${ds}</p><span class="text-xs px-2.5 py-1 rounded-full font-medium ${s.cls}">${s.label}</span></div><div class="space-y-2.5 mb-3">${task.messages.map(m=>`<div class="flex ${m.role==='user'?'justify-end':'justify-start'} gap-2 items-end"><div class="${m.role==='user'?'msg-user':'msg-assistant'} px-3.5 py-2.5 text-sm max-w-[85%] prose-response">${m.role==='user'?escHtml(m.content):renderMarkdown(m.content)}</div><button onclick="copyMsg(${JSON.stringify(m.content)})" class="flex-shrink-0 text-gray-200 hover:text-gray-400 transition mb-1"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg></button></div>`).join('')}</div>${task.status==='running'?`<div class="flex justify-start items-center gap-2 mb-3"><div class="msg-assistant px-4 py-2.5 flex items-center gap-2 text-gray-400 text-sm"><svg class="spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 12 6.477 12 12h-4z"/></svg>考え中...</div><button onclick="abortTask(${task.id})" class="text-xs text-gray-400 hover:text-red-500 transition flex items-center gap-1 px-2.5 py-2 bg-gray-100 hover:bg-red-50 rounded-xl flex-shrink-0"><svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>中断</button></div>`:''  }${(task.status==='done'||task.status==='error')&&hasResp?`<div class="flex gap-2 mt-1"><textarea id="reply-${task.id}" placeholder="返信する..." class="flex-1 border border-gray-200 rounded-xl px-3.5 py-2.5 text-sm resize-none transition" rows="2" onkeydown="if((event.metaKey||event.ctrlKey)&&event.key==='Enter')sendReply(${task.id})"></textarea><button onclick="sendReply(${task.id})" class="btn-primary text-white px-3.5 rounded-xl flex items-center justify-center self-end py-2.5 flex-shrink-0 shadow-sm"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg></button></div>`:''}<div class="flex gap-2 mt-3">${task.status==='pending'?`<button onclick="executeTask(${task.id})" class="flex-1 btn-primary text-white py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-1.5 shadow-sm"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>実行</button>`:''  }${task.status==='done'?`<button onclick="archiveTask(${task.id})" class="flex-1 bg-gray-100 hover:bg-green-50 hover:text-green-600 text-gray-500 py-2.5 rounded-xl text-sm font-semibold transition flex items-center justify-center gap-1.5"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>履歴へ</button>`:''  }${task.status==='error'?`<button onclick="executeTask(${task.id})" class="flex-1 bg-red-50 text-red-500 hover:bg-red-100 py-2.5 rounded-xl text-sm font-semibold transition">再実行</button>`:''  }<button onclick="archiveTask(${task.id})" class="bg-gray-100 hover:bg-red-50 hover:text-red-400 text-gray-300 py-2.5 px-3.5 rounded-xl transition"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button></div></div>`;
         }
 
         function renderMarkdown(text) {
